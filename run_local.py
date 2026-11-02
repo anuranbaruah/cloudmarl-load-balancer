@@ -106,7 +106,18 @@ def run():
                                       stdout=log, stderr=subprocess.STDOUT))
 
     print("Starting PostgreSQL ...")
-    pg = pgserver.get_server(LOCAL / "pgdata", cleanup_mode="stop")   # stops when we exit
+    # After an unclean shutdown (window closed without Ctrl+C) Postgres runs crash
+    # recovery, which on Windows can outlast pgserver's 10 s start timeout. The
+    # server keeps starting in the background, so wait and attach to it.
+    for _ in range(12):
+        try:
+            pg = pgserver.get_server(LOCAL / "pgdata", cleanup_mode="stop")   # stops when we exit
+            break
+        except (subprocess.TimeoutExpired, AssertionError):
+            print("  PostgreSQL is recovering from an unclean shutdown, waiting ...")
+            time.sleep(10)
+    else:
+        raise RuntimeError(f"PostgreSQL did not start; see {LOCAL / 'pgdata' / 'log'}")
     pg.psql((ROOT / "db" / "init.sql").read_text())
     db_url = pg.get_uri()
     try:
