@@ -19,6 +19,10 @@ share Q-tables and don't send each other messages. Each one learns from its own
 rewards which VM to send a job to, even though the other three agents keep
 changing the load it sees.
 
+**Demo video:** [demo/cloudmarl_demo.mp4](demo/cloudmarl_demo.mp4): the agents learning from
+scratch on the live Grafana dashboard, a worker VM crashed and recovered through its API,
+and the cloud API's job summary.
+
 ## What each folder is
 
 | Folder | What it does |
