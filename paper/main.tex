@@ -211,12 +211,12 @@ MARL        & 5896 & \textbf{591.8} & \textbf{326.1} & \textbf{2633.5} & \textbf
 \end{tabular}
 \end{table}
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.92\textwidth]{figures/results.pdf}
-\caption{Mean latency, P95 latency and rejected-job rate per policy over the measurement window.}
+\includegraphics[width=\columnwidth]{figures/results.pdf}
+\caption{Mean latency, P95 latency and rejected-job rate per policy over the measurement window (Rand.: random, RR: round-robin).}
 \label{fig:results}
-\end{figure*}
+\end{figure}
 
 \subsection{Learning dynamics}
 Fig.~\ref{fig:curve} plots 5-second averages over each full run. Starting from a uniformly random policy, the MARL agents' latency fell below 400~ms within about 30~s, while $\varepsilon$ was still decaying. $\varepsilon$ reached its floor of 0.02 after 43~s, close to the expected $\ln 0.02 / \ln 0.995 \approx 780$ decisions at 17 decisions/s (46~s). After their first 10~s, the baselines stayed between roughly 1.0 and 1.7~s.
