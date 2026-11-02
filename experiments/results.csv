@@ -1,0 +1,4 @@
+Policy,Jobs,Avg latency (ms),Median (ms),P95 (ms),Dropped (%)
+Random,5975,1422.7,390.1,4547.8,12.69
+Round-robin,5957,1469.5,362.2,4547.6,11.25
+MARL (Q-learning),5896,591.8,326.1,2633.5,1.53

@@ -1,0 +1,85 @@
+# CloudMARL: full stack
+# Start:  docker compose up -d --build
+# Switch policy: set MODE=marl | rr | random in .env, then:
+#   docker compose up -d --force-recreate lb-mumbai lb-singapore lb-frankfurt lb-virginia
+
+x-worker: &worker
+  build: .
+  command: ["uvicorn", "worker:app", "--app-dir", "worker", "--host", "0.0.0.0", "--port", "8000"]
+
+x-balancer: &balancer
+  build: .
+  command: ["python", "-u", "balancer/balancer.py"]
+  depends_on: [cloud, vm-xl, vm-l, vm-m, vm-s1, vm-s2]
+
+x-balancer-env: &balancer-env
+  MODE: ${MODE:-marl}
+  RATE: ${RATE:-17}                  # jobs/s per region (4 x 17 = 68% of pool capacity)
+  CLOUD_URL: http://cloud:8000
+  WORKERS: http://vm-xl:8000,http://vm-l:8000,http://vm-m:8000,http://vm-s1:8000,http://vm-s2:8000
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cm-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-cloudmarl}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cloudmarl}
+      POSTGRES_DB: ${DB_NAME:-cloudmarl}
+    ports: ["127.0.0.1:5433:5432"]   # 5433 avoids clash with a local PostgreSQL; localhost only
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-cloudmarl}"]
+      interval: 5s
+      retries: 10
+
+  cloud:
+    build: .
+    container_name: cm-cloud
+    command: ["uvicorn", "app:app", "--app-dir", "cloud", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-cloudmarl}:${DB_PASSWORD:-cloudmarl}@db:5432/${DB_NAME:-cloudmarl}
+    ports: ["127.0.0.1:8000:8000"]   # localhost only: /reset must not be public
+    depends_on:
+      db: { condition: service_healthy }
+
+  # Worker VMs: same image, different size. Total capacity = 20 slots / 200 ms = 100 jobs/s
+  vm-xl: { <<: *worker, environment: { NAME: vm-xl, CAPACITY: 7 }, ports: ["127.0.0.1:8101:8000"] }
+  vm-l:  { <<: *worker, environment: { NAME: vm-l,  CAPACITY: 5 }, ports: ["127.0.0.1:8102:8000"] }
+  vm-m:  { <<: *worker, environment: { NAME: vm-m,  CAPACITY: 4 }, ports: ["127.0.0.1:8103:8000"] }
+  vm-s1: { <<: *worker, environment: { NAME: vm-s1, CAPACITY: 2 }, ports: ["127.0.0.1:8104:8000"] }
+  vm-s2: { <<: *worker, environment: { NAME: vm-s2, CAPACITY: 2 }, ports: ["127.0.0.1:8105:8000"] }
+
+  # Regional load balancers = the 4 MARL agents. NET_MS = emulated delay to vm-xl,l,m,s1,s2
+  lb-mumbai:
+    <<: *balancer
+    environment: { <<: *balancer-env, REGION: mumbai,    NET_MS: "30,50,120,20,150" }
+  lb-singapore:
+    <<: *balancer
+    environment: { <<: *balancer-env, REGION: singapore, NET_MS: "40,30,100,80,140" }
+  lb-frankfurt:
+    <<: *balancer
+    environment: { <<: *balancer-env, REGION: frankfurt, NET_MS: "100,120,30,110,50" }
+  lb-virginia:
+    <<: *balancer
+    environment: { <<: *balancer-env, REGION: virginia,  NET_MS: "140,150,60,160,20" }
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: cm-grafana
+    ports: ["3000:3000"]   # the only public port: read-only dashboard for visitors
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-%(protocol)s://%(domain)s:%(http_port)s/}   # Grafana's default; Codespaces sets its public URL
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/cloudmarl.json
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [db]
+
+volumes:
+  pgdata:

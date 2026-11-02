@@ -1,0 +1,58 @@
+{
+  "uid": "cloudmarl-main",
+  "title": "CloudMARL — Multi-Agent Load Balancing",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "timeseries", "title": "Average job latency (ms) by policy",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "uid": "cloudmarl-db" },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [{ "refId": "A", "format": "time_series", "rawQuery": true, "editorMode": "code",
+        "rawSql": "SELECT $__timeGroupAlias(ts, '5s'), mode AS metric, avg(latency_ms) AS value FROM jobs WHERE ok AND $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1" }]
+    },
+    {
+      "type": "timeseries", "title": "Dropped jobs (%) by policy",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "uid": "cloudmarl-db" },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [{ "refId": "A", "format": "time_series", "rawQuery": true, "editorMode": "code",
+        "rawSql": "SELECT $__timeGroupAlias(ts, '5s'), mode AS metric, 100.0 * avg(CASE WHEN ok THEN 0 ELSE 1 END) AS value FROM jobs WHERE $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1" }]
+    },
+    {
+      "type": "timeseries", "title": "Jobs per second by worker VM",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "cloudmarl-db" },
+      "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 } } },
+      "targets": [{ "refId": "A", "format": "time_series", "rawQuery": true, "editorMode": "code",
+        "rawSql": "SELECT $__timeGroupAlias(ts, '5s'), worker AS metric, count(*) / 5.0 AS value FROM jobs WHERE ok AND $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1" }]
+    },
+    {
+      "type": "timeseries", "title": "Exploration ε per agent (MARL)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "cloudmarl-db" },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 } },
+      "targets": [{ "refId": "A", "format": "time_series", "rawQuery": true, "editorMode": "code",
+        "rawSql": "SELECT $__timeGroupAlias(ts, '5s'), region AS metric, avg(epsilon) AS value FROM jobs WHERE mode = 'marl' AND $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1" }]
+    },
+    {
+      "type": "table", "title": "Routing share per region, last 60 s (% of that region's jobs)",
+      "gridPos": { "x": 0, "y": 16, "w": 16, "h": 7 },
+      "datasource": { "uid": "cloudmarl-db" },
+      "targets": [{ "refId": "A", "format": "table", "rawQuery": true, "editorMode": "code",
+        "rawSql": "SELECT region AS \"Region\", mode AS \"Policy\", round(100 * avg(CASE WHEN worker='vm-xl' THEN 1 ELSE 0 END)) AS \"vm-xl (7)\", round(100 * avg(CASE WHEN worker='vm-l' THEN 1 ELSE 0 END)) AS \"vm-l (5)\", round(100 * avg(CASE WHEN worker='vm-m' THEN 1 ELSE 0 END)) AS \"vm-m (4)\", round(100 * avg(CASE WHEN worker='vm-s1' THEN 1 ELSE 0 END)) AS \"vm-s1 (2)\", round(100 * avg(CASE WHEN worker='vm-s2' THEN 1 ELSE 0 END)) AS \"vm-s2 (2)\" FROM jobs WHERE ts > now() - interval '60 seconds' GROUP BY 1, 2 ORDER BY 1" }]
+    },
+    {
+      "type": "bargauge", "title": "P95 latency (ms) by policy",
+      "gridPos": { "x": 16, "y": 16, "w": 8, "h": 7 },
+      "datasource": { "uid": "cloudmarl-db" },
+      "fieldConfig": { "defaults": { "unit": "ms", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "orientation": "horizontal", "displayMode": "basic", "showUnfilled": true,
+        "reduceOptions": { "values": true, "calcs": [], "fields": "/^p95$/" } },
+      "targets": [{ "refId": "A", "format": "table", "rawQuery": true, "editorMode": "code",
+        "rawSql": "SELECT mode, percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95 FROM jobs WHERE ok AND $__timeFilter(ts) GROUP BY 1 ORDER BY 1" }]
+    }
+  ]
+}

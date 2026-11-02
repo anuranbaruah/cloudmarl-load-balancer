@@ -1,0 +1,10 @@
+{
+  "name": "CloudMARL",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": { "ghcr.io/devcontainers/features/docker-in-docker:2": {} },
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+  "forwardPorts": [3000],
+  "portsAttributes": { "3000": { "label": "Grafana dashboard", "onAutoForward": "openBrowser" } },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "docker compose up -d --build"
+}

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CloudMARL Load Balancer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: control-room console. Live topology is the hero, telemetry rail on the right, learning evidence below, theory last. */
+:root{
+  --bg:#edf1f6; --panel:#fbfcfe; --ink:#122033; --muted:#56667c; --line:#d3dbe6;
+  --accent:#2453d1; --rr:#b8740a; --rand:#8b95a5; --bad:#c3342b; --good:#1d8657;
+  --a1:#2453d1; --a2:#c93f74; --a3:#14907f; --a4:#7d52d0;
+  --display:'Bricolage Grotesque', system-ui, sans-serif;
+  --body:'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --mono:'IBM Plex Mono', ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c131e; --panel:#131d2b; --ink:#e3eaf3; --muted:#93a2b7; --line:#25334a;
+  --accent:#6e98ff; --rr:#e5a23d; --rand:#7d8898; --bad:#ff6a5c; --good:#4cc38a;
+  --a1:#6e98ff; --a2:#f07aa6; --a3:#4fd1bf; --a4:#b48eff; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c131e; --panel:#131d2b; --ink:#e3eaf3; --muted:#93a2b7; --line:#25334a;
+  --accent:#6e98ff; --rr:#e5a23d; --rand:#7d8898; --bad:#ff6a5c; --good:#4cc38a;
+  --a1:#6e98ff; --a2:#f07aa6; --a3:#4fd1bf; --a4:#b48eff; color-scheme:dark}
+
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1240px;margin:0 auto;display:grid;gap:16px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(30px,5vw,46px);font-weight:800;letter-spacing:-.02em}
+h2{font-size:17px;font-weight:600}
+h3{font-size:15px;font-weight:600}
+p{margin:0}
+.eyebrow{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.top{display:flex;flex-wrap:wrap;gap:16px;align-items:end;justify-content:space-between}
+.top .sub{color:var(--muted);max-width:60ch;margin-top:6px}
+.verdict{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:12px 16px;min-width:0;max-width:420px}
+.verdict b{font:600 26px var(--mono);display:block;color:var(--accent)}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+button{font:500 14px var(--body);color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:7px;padding:7px 14px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--panel);min-width:92px}
+label{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+label output{color:var(--ink);font-family:var(--mono);min-width:5ch}
+input[type=range]{accent-color:var(--accent);width:120px}
+
+.grid{display:grid;gap:16px;grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:10px;align-content:start;min-width:0}
+.card .head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+canvas{display:block;width:100%;max-width:100%}
+#topo{aspect-ratio:16/10}
+#chart{height:230px}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 12px var(--mono);padding:5px 10px;border-radius:999px}
+.chip[aria-pressed="true"]{border-color:var(--bad);color:var(--bad);border-style:dashed}
+
+.pol{display:grid;grid-template-columns:12px 1fr auto;gap:2px 10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.pol:first-of-type{border-top:0}
+.sw{width:12px;height:12px;border-radius:3px}
+.pol .name{font-weight:600}
+.pol .val{font:500 20px var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.pol .sub{grid-column:2/4;font-size:12px;color:var(--muted);display:flex;justify-content:space-between}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
+.kv span:nth-child(even){color:var(--ink);font-family:var(--mono);text-align:right}
+
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font:12px var(--mono);font-variant-numeric:tabular-nums}
+th,td{padding:6px 6px;text-align:center;border-bottom:1px solid var(--line)}
+th{font-weight:500;color:var(--muted)}
+th:first-child,td:first-child{text-align:left;color:var(--ink);white-space:nowrap}
+td small{display:block;color:var(--muted);font-size:10px}
+.note{font-size:12px;color:var(--muted)}
+
+.explain{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.explain dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px}
+.explain dt{font:500 12px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding-top:2px}
+.explain dd{margin:0}
+.eq{font:14px var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px 12px;overflow-x:auto;white-space:nowrap}
+ol{margin:0;padding-left:20px;display:grid;gap:8px;font-size:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow">Cloud Computing · Multi-Agent Reinforcement Learning</p>
+      <h1>CloudMARL Load Balancer</h1>
+      <p class="sub">Four regional load balancers learn on their own, with no central controller, to share a pool of five unequal VMs. Each one is an independent Q-learning agent. The same traffic is replayed against round-robin and random routing for comparison.</p>
+    </div>
+    <div class="verdict" aria-live="polite"><span class="eyebrow">Result so far</span><b id="vNum">—</b><span id="vText" class="note">Agents are exploring.</span></div>
+  </header>
+
+  <section class="controls" aria-label="Simulation controls">
+    <button id="play" class="primary">Pause</button>
+    <button id="reset">Reset learning</button>
+    <button id="spike">Traffic spike ×1.5</button>
+    <label for="speed">Speed <input id="speed" type="range" min="0" max="5" value="2"><output id="speedOut">1×</output></label>
+    <label for="load">Load <input id="load" type="range" min="40" max="100" value="70"><output id="loadOut">70%</output></label>
+  </section>
+
+  <main class="grid">
+    <section class="card">
+      <div class="head"><h2>Live routing by MARL agents</h2><span class="note">Line width = share of traffic. Click a VM below to take it down.</span></div>
+      <canvas id="topo" aria-label="Network diagram of four regional agents routing jobs to five virtual machines"></canvas>
+      <div class="chips" id="chips"></div>
+    </section>
+
+    <aside class="card">
+      <h2>Telemetry</h2>
+      <div>
+        <div class="pol"><span class="sw" style="background:var(--accent)"></span><span class="name">MARL (Q-learning)</span><span class="val" id="l0">–</span><span class="sub"><span>avg latency, ms</span><span id="d0">drops 0%</span></span></div>
+        <div class="pol"><span class="sw" style="background:var(--rr)"></span><span class="name">Round-robin</span><span class="val" id="l1">–</span><span class="sub"><span>avg latency, ms</span><span id="d1">drops 0%</span></span></div>
+        <div class="pol"><span class="sw" style="background:var(--rand)"></span><span class="name">Random</span><span class="val" id="l2">–</span><span class="sub"><span>avg latency, ms</span><span id="d2">drops 0%</span></span></div>
+      </div>
+      <div class="kv">
+        <span>Simulation tick</span><span id="tick">0</span>
+        <span>Exploration ε</span><span id="eps">1.000</span>
+        <span>Jobs per tick (all regions)</span><span id="arr">0</span>
+        <span>Pool capacity, jobs/tick</span><span id="cap">20</span>
+        <span>Q-table size</span><span>4 × 243 × 5</span>
+      </div>
+    </aside>
+
+    <section class="card">
+      <div class="head"><h2>Average job latency</h2>
+        <div class="legend"><span><i style="background:var(--accent)"></i>MARL</span><span><i style="background:var(--rr)"></i>Round-robin</span><span><i style="background:var(--rand)"></i>Random</span></div>
+      </div>
+      <canvas id="chart" aria-label="Line chart of average latency over the last 600 ticks"></canvas>
+    </section>
+
+    <section class="card">
+      <h2>Learned routing share</h2>
+      <div class="scroll"><table id="mx"></table></div>
+      <p class="note">Share of each region's jobs sent to each VM, from recent ticks. Small text is network delay from that region.</p>
+    </section>
+  </main>
+
+  <section class="explain">
+    <div class="card">
+      <h2>How the MARL system works</h2>
+      <dl>
+        <dt>Problem</dt><dd>Requests arrive at 4 regional load balancers (Mumbai, Singapore, Frankfurt, Virginia) and must be placed on 5 shared VMs with capacities 7, 5, 4, 2 and 2 jobs per tick.</dd>
+        <dt>Agents</dt><dd>One independent Q-learner per region. No agent sees the others' choices or Q-tables.</dd>
+        <dt>State</dt><dd>Each VM's load bucket (idle, busy, saturated): 3<sup>5</sup> = 243 states.</dd>
+        <dt>Action</dt><dd>Which VM receives the job (5 actions).</dd>
+        <dt>Reward</dt><dd>−(queue wait + network delay). A job sent to a down or full VM is dropped and scores −3000 ms.</dd>
+        <dt>Policy</dt><dd>ε-greedy. ε decays from 1.0 to 0.02. A VM failure raises ε to 0.3 so agents re-explore.</dd>
+      </dl>
+      <div class="eq">Q(s,a) ← Q(s,a) + α [ r + γ · max<sub>a′</sub> Q(s′,a′) − Q(s,a) ]&nbsp;&nbsp; α = 0.1, γ = 0.3</div>
+      <p class="note">Why it is multi-agent: the best VM for Mumbai depends on what the other three regions send there. From each agent's view the environment keeps changing as the others learn (non-stationarity), yet they settle on a split of the pool without talking to each other.</p>
+    </div>
+    <div class="card">
+      <h2>Demo script for class</h2>
+      <ol>
+        <li>Press <b>Reset learning</b>. With ε = 1 the agents act randomly, so MARL latency tracks the Random line.</li>
+        <li>Set speed to 8× for about 15 seconds. As ε decays the blue line falls below both baselines.</li>
+        <li>Point at the routing table. Regions favour nearby, high-capacity VMs and keep the small VMs lightly loaded.</li>
+        <li>Click <b>vm-l</b> to take it down. Baselines keep sending jobs to it and drop them. MARL re-explores and reroutes.</li>
+        <li>Press <b>Traffic spike</b> to show behaviour under a 1.5× burst, then bring the VM back up.</li>
+      </ol>
+      <p class="note">Baselines are capacity-blind and have no health checks, like plain DNS round-robin. Everything runs in your browser; all three policies see the same random arrivals each tick.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+const AGENTS = ['Mumbai', 'Singapore', 'Frankfurt', 'Virginia'];
+const SERVERS = [{name:'vm-xl',cap:7},{name:'vm-l',cap:5},{name:'vm-m',cap:4},{name:'vm-s1',cap:2},{name:'vm-s2',cap:2}];
+// network delay in ticks (1 tick = 100 simulated ms), rows = regions, cols = VMs
+const NET = [
+  [0.3, 0.5, 1.2, 0.2, 1.5],
+  [0.4, 0.3, 1.0, 0.8, 1.4],
+  [1.0, 1.2, 0.3, 1.1, 0.5],
+  [1.4, 1.5, 0.6, 1.6, 0.2],
+];
+const NA = SERVERS.length, NS = 3 ** NA, ALPHA = 0.1, GAMMA = 0.3, EPS_MIN = 0.02, TIMEOUT = 30, QMAX = 120, HIST = 600;
+const TOTAL_CAP = SERVERS.reduce((s, v) => s + v.cap, 0);
+const SPEEDS = [0.1, 0.25, 0.5, 1, 3, 8], SPEED_LABEL = ['0.2×', '0.5×', '1×', '2×', '6×', '16×'];
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+
+let Q, eps, t, sims, failed, spike, particles, lastArr, running = true, acc = 0, frameN = 0;
+
+function reset() {
+  Q = new Float32Array(AGENTS.length * NS * NA);
+  eps = 1; t = 0; spike = 0; particles = []; lastArr = AGENTS.map(() => 0);
+  failed = SERVERS.map(() => false);
+  sims = ['marl', 'rr', 'rand'].map(kind => ({
+    kind, q: SERVERS.map(() => 0), ptr: AGENTS.map((_, a) => a % NA),
+    share: AGENTS.map(() => SERVERS.map(() => 0)), ema: null, dropEma: 0, hist: [],
+  }));
+  renderChips();
+}
+
+function poisson(l) { const L = Math.exp(-l); let k = 0, p = 1; do { k++; p *= Math.random(); } while (p > L); return k - 1; }
+
+function encode(q) {
+  let s = 0;
+  for (let i = 0; i < NA; i++) { const w = failed[i] ? 9 : q[i] / SERVERS[i].cap; s = s * 3 + (w < 0.5 ? 0 : w < 2 ? 1 : 2); }
+  return s;
+}
+
+function choose(sim, a, s) {
+  if (sim.kind === 'rand') return Math.random() * NA | 0;
+  if (sim.kind === 'rr') { const x = sim.ptr[a]; sim.ptr[a] = (x + 1) % NA; return x; }
+  if (Math.random() < eps) return Math.random() * NA | 0;
+  const o = (a * NS + s) * NA; let best = 0;
+  for (let k = 1; k < NA; k++) if (Q[o + k] > Q[o + best]) best = k;
+  return best;
+}
+
+function step(sim, arr) {
+  let lat = 0, n = 0, drop = 0, more = true;
+  const left = arr.slice();
+  while (more) { // interleave regions so no agent always goes first
+    more = false;
+    for (let a = 0; a < left.length; a++) {
+      if (!left[a]) continue;
+      left[a]--; more = true;
+      const s = encode(sim.q), act = choose(sim, a, s);
+      let l;
+      if (failed[act] || sim.q[act] >= QMAX) { l = TIMEOUT; drop++; }
+      else { l = (sim.q[act] + 1) / SERVERS[act].cap + NET[a][act]; sim.q[act]++; }
+      if (sim.kind === 'marl') {
+        const o2 = (a * NS + encode(sim.q)) * NA; let m = Q[o2];
+        for (let k = 1; k < NA; k++) m = Math.max(m, Q[o2 + k]);
+        const i = (a * NS + s) * NA + act;
+        Q[i] += ALPHA * (-l + GAMMA * m - Q[i]);
+        if (!reduceMotion && particles.length < 160 && Math.random() < 0.3) particles.push({ a, s: act, p: 0, bad: l === TIMEOUT });
+      }
+      sim.share[a][act]++; lat += l; n++;
+    }
+  }
+  sim.q = sim.q.map((q, i) => failed[i] ? 0 : Math.max(0, q - SERVERS[i].cap));
+  sim.share.forEach(r => r.forEach((v, i) => r[i] = v * 0.97));
+  if (n) {
+    const avg = lat / n * 100;
+    sim.ema = sim.ema == null ? avg : sim.ema * 0.97 + avg * 0.03;
+    sim.dropEma = sim.dropEma * 0.97 + drop / n * 0.03;
+  }
+  sim.hist.push(sim.ema);
+  if (sim.hist.length > HIST) sim.hist.shift();
+}
+
+function tick() {
+  const load = $('load').value / 100 * (spike > 0 ? 1.5 : 1);
+  lastArr = AGENTS.map(() => poisson(load * TOTAL_CAP / AGENTS.length));
+  sims.forEach(s => step(s, lastArr));
+  eps = Math.max(EPS_MIN, eps * 0.995);
+  if (spike > 0) spike--;
+  t++;
+}
+
+/* ---------- drawing ---------- */
+const topo = $('topo'), chart = $('chart'), tctx = topo.getContext('2d'), cctx = chart.getContext('2d');
+let C = {};
+function readColors() {
+  const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+  C = { ink: v('--ink'), muted: v('--muted'), line: v('--line'), panel: v('--panel'), bg: v('--bg'), bad: v('--bad'), good: v('--good'),
+        series: [v('--accent'), v('--rr'), v('--rand')], agents: [v('--a1'), v('--a2'), v('--a3'), v('--a4')], warn: v('--rr') };
+}
+function fit(c, ctx) {
+  const r = c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function resize() { fit(topo, tctx); fit(chart, cctx); }
+
+function geom() {
+  const W = topo.clientWidth, H = topo.clientHeight;
+  const bw = Math.min(150, W * 0.3), bh = Math.min(46, H * 0.15), r = Math.min(22, H * 0.07);
+  return { W, H, bw, bh, r, ax: Math.max(W * 0.12, r + 8), sx: W - bw / 2 - 8,
+           ay: i => H * (0.13 + i * 0.24), sy: i => H * (0.1 + i * 0.2) };
+}
+function bez(g, a, s, p) {
+  const x0 = g.ax + g.r, y0 = g.ay(a), x3 = g.sx - g.bw / 2, y3 = g.sy(s), x1 = (x0 + x3) / 2, x2 = x1, u = 1 - p;
+  return [u*u*u*x0 + 3*u*u*p*x1 + 3*u*p*p*x2 + p*p*p*x3, u*u*u*y0 + 3*u*u*p*y0 + 3*u*p*p*y3 + p*p*p*y3];
+}
+
+function drawTopo() {
+  const g = geom(), ctx = tctx, m = sims[0];
+  ctx.clearRect(0, 0, g.W, g.H);
+  // routing links
+  m.share.forEach((row, a) => {
+    const tot = row.reduce((x, y) => x + y, 0) || 1;
+    row.forEach((v, s) => {
+      const f = v / tot; if (f < 0.03) return;
+      const x0 = g.ax + g.r, y0 = g.ay(a), x3 = g.sx - g.bw / 2, y3 = g.sy(s), xm = (x0 + x3) / 2;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.bezierCurveTo(xm, y0, xm, y3, x3, y3);
+      ctx.strokeStyle = C.agents[a]; ctx.globalAlpha = 0.18 + f * 0.5; ctx.lineWidth = 1 + f * 9; ctx.stroke();
+    });
+  });
+  ctx.globalAlpha = 1;
+  // jobs in flight
+  particles.forEach(p => {
+    const [x, y] = bez(g, p.a, p.s, p.p);
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, 7); ctx.fillStyle = p.bad && p.p > 0.85 ? C.bad : C.agents[p.a]; ctx.fill();
+  });
+  // regional agents
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  AGENTS.forEach((name, a) => {
+    const x = g.ax, y = g.ay(a);
+    ctx.beginPath(); ctx.arc(x, y, g.r, 0, 7); ctx.fillStyle = C.agents[a]; ctx.fill();
+    ctx.fillStyle = C.panel; ctx.font = `600 ${Math.max(10, g.r * 0.6)}px 'IBM Plex Mono', monospace`; ctx.fillText(lastArr[a], x, y);
+    ctx.fillStyle = C.ink; ctx.font = `500 11px 'IBM Plex Sans', sans-serif`; ctx.fillText(name, x, y + g.r + 9);
+  });
+  // VMs
+  SERVERS.forEach((sv, i) => {
+    const x = g.sx - g.bw / 2, y = g.sy(i) - g.bh / 2, q = m.q[i], w = q / sv.cap;
+    ctx.fillStyle = C.panel; ctx.strokeStyle = failed[i] ? C.bad : C.line; ctx.lineWidth = failed[i] ? 2 : 1;
+    ctx.setLineDash(failed[i] ? [5, 4] : []);
+    ctx.beginPath(); ctx.roundRect(x, y, g.bw, g.bh, 6); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+    ctx.textAlign = 'left'; ctx.fillStyle = failed[i] ? C.bad : C.ink;
+    ctx.font = `600 11px 'IBM Plex Mono', monospace`;
+    ctx.fillText(failed[i] ? `${sv.name}  DOWN` : sv.name, x + 8, y + g.bh * 0.32);
+    ctx.fillStyle = C.muted; ctx.font = `10px 'IBM Plex Mono', monospace`;
+    ctx.fillText(`cap ${sv.cap} · queue ${q}`, x + 8, y + g.bh * 0.62);
+    if (!failed[i]) {
+      ctx.fillStyle = C.line; ctx.fillRect(x + 8, y + g.bh - 7, g.bw - 16, 3);
+      ctx.fillStyle = w < 1 ? C.good : w < 3 ? C.warn : C.bad;
+      ctx.fillRect(x + 8, y + g.bh - 7, (g.bw - 16) * Math.min(1, w / 4), 3);
+    }
+  });
+}
+
+function niceCeil(v) { const p = 10 ** Math.floor(Math.log10(v)); for (const k of [1, 2, 2.5, 5, 10]) if (k * p >= v) return k * p; }
+
+function drawChart() {
+  const ctx = cctx, W = chart.clientWidth, H = chart.clientHeight, L = 48, R = 10, T = 10, B = 22;
+  ctx.clearRect(0, 0, W, H);
+  let mx = 200;
+  sims.forEach(s => s.hist.forEach(v => { if (v != null && v > mx) mx = v; }));
+  mx = niceCeil(mx);
+  ctx.font = `11px 'IBM Plex Mono', monospace`; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+  for (let k = 0; k <= 4; k++) {
+    const v = mx * k / 4, y = T + (H - T - B) * (1 - k / 4);
+    ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.fillText(Math.round(v), L - 6, y);
+  }
+  ctx.textAlign = 'left'; ctx.fillText('ms', 4, T + 2);
+  ctx.textAlign = 'right'; ctx.fillText(`last ${HIST} ticks →  now (tick ${t})`, W - R, H - 8);
+  sims.slice().reverse().forEach((s, ri) => {
+    const off = HIST - s.hist.length;
+    ctx.beginPath(); let started = false, lx = 0, ly = 0;
+    s.hist.forEach((v, i) => {
+      if (v == null) return;
+      const x = L + (off + i) / (HIST - 1) * (W - L - R), y = T + (H - T - B) * (1 - v / mx);
+      started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true; lx = x; ly = y;
+    });
+    const col = C.series[2 - ri];
+    ctx.strokeStyle = col; ctx.lineWidth = ri === 2 ? 2.5 : 1.75; ctx.stroke();
+    if (started) { ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, 7); ctx.fillStyle = col; ctx.fill(); }
+  });
+}
+
+/* ---------- panels ---------- */
+function renderChips() {
+  $('chips').replaceChildren(...SERVERS.map((sv, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.setAttribute('aria-pressed', failed[i]);
+    b.textContent = `${sv.name} · ${failed[i] ? 'down, click to restore' : 'up'}`;
+    b.onclick = () => {
+      failed[i] = !failed[i];
+      sims.forEach(s => s.q[i] = 0);
+      eps = Math.max(eps, 0.3); // health-check alert: re-explore
+      renderChips();
+    };
+    return b;
+  }));
+  $('cap').textContent = SERVERS.reduce((s, v, i) => s + (failed[i] ? 0 : v.cap), 0);
+}
+
+function updatePanel() {
+  sims.forEach((s, i) => {
+    $('l' + i).textContent = s.ema == null ? '–' : Math.round(s.ema);
+    $('d' + i).textContent = `drops ${(s.dropEma * 100).toFixed(1)}%`;
+  });
+  $('tick').textContent = t; $('eps').textContent = eps.toFixed(3);
+  $('arr').textContent = lastArr.reduce((a, b) => a + b, 0) + (spike > 0 ? ' (spike)' : '');
+  const [m, rr, rd] = sims.map(s => s.ema);
+  if (t < 150 || m == null) { $('vNum').textContent = '—'; $('vText').textContent = `Agents are exploring (ε = ${eps.toFixed(2)}).`; }
+  else {
+    const best = Math.min(rr, rd), pct = Math.round((1 - m / best) * 100);
+    $('vNum').textContent = `${Math.abs(pct)}% ${pct >= 0 ? 'lower' : 'higher'}`;
+    $('vText').textContent = `MARL latency vs. the best baseline (${rr <= rd ? 'round-robin' : 'random'}).`;
+  }
+  const html = ['<tr><th>Region</th>' + SERVERS.map((s, i) => `<th>${s.name}<small>cap ${s.cap}${failed[i] ? ' · down' : ''}</small></th>`).join('') + '</tr>'];
+  sims[0].share.forEach((row, a) => {
+    const tot = row.reduce((x, y) => x + y, 0) || 1;
+    html.push(`<tr><td>${AGENTS[a]}</td>` + row.map((v, s) => {
+      const f = v / tot;
+      return `<td style="background:color-mix(in srgb, var(--accent) ${Math.round(f * 70)}%, transparent)">${Math.round(f * 100)}%<small>${NET[a][s] * 100} ms</small></td>`;
+    }).join('') + '</tr>');
+  });
+  $('mx').innerHTML = html.join('');
+}
+
+function frame() {
+  if (running) { acc += SPEEDS[$('speed').value]; while (acc >= 1) { tick(); acc--; } }
+  particles.forEach(p => p.p += 0.035);
+  particles = particles.filter(p => p.p < 1);
+  if (frameN++ % 30 === 0) readColors();
+  drawTopo(); drawChart();
+  if (frameN % 8 === 0) updatePanel();
+  requestAnimationFrame(frame);
+}
+
+$('play').onclick = () => { running = !running; $('play').textContent = running ? 'Pause' : 'Play'; };
+$('reset').onclick = reset;
+$('spike').onclick = () => { spike = 40; };
+$('speed').oninput = () => $('speedOut').textContent = SPEED_LABEL[$('speed').value];
+$('load').oninput = () => $('loadOut').textContent = $('load').value + '%';
+addEventListener('resize', resize);
+reset(); readColors(); resize(); updatePanel(); frame();
+</script>
