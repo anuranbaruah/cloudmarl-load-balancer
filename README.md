@@ -48,6 +48,18 @@ Then open:
 
 Stop everything: `docker compose down` (add `-v` to also wipe the database).
 
+### No Docker? (Windows)
+
+```powershell
+python run_local.py
+```
+
+The first run downloads Python 3.12, the packages, a portable PostgreSQL and a
+portable Grafana into `.local/` (about 400 MB, a few minutes). Later runs start
+in seconds. It starts every service, opens the Grafana dashboard and prints each
+agent's progress every 10 s. Press **Ctrl+C** to stop everything.
+Switch policy with `$env:MODE="rr"` (or `random`) before running.
+
 ## 2. The MARL module (the core contribution)
 
 | | Design |
