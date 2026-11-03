@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 import psycopg
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 DB_URL = os.getenv("DATABASE_URL",
                    "postgresql://cloudmarl:cloudmarl@localhost:5432/cloudmarl")
@@ -32,6 +33,11 @@ def db():
             except psycopg.OperationalError:
                 time.sleep(1)
     return _conn
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/docs")
 
 
 @app.get("/health")
