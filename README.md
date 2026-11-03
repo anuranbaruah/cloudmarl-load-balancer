@@ -58,7 +58,8 @@ Stop everything: `docker compose down` (add `-v` to also wipe the database).
 python run_local.py
 ```
 
-Or just double-click **`run.bat`** (`run.bat rr` or `run.bat random` runs a baseline instead).
+Or just double-click **`run.bat`**; it opens the Grafana dashboard and the API docs in your browser
+(`run.bat rr` or `run.bat random` runs a baseline instead).
 
 The first run downloads Python 3.12, the packages, a portable PostgreSQL and a
 portable Grafana into `.local/` (about 400 MB, a few minutes). Later runs start

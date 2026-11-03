@@ -140,6 +140,7 @@ def run():
                   REGION=region, NET_MS=net, WORKERS=workers, MODE=mode,
                   RATE=os.getenv("RATE", "17"), CLOUD_URL="http://127.0.0.1:8000")
 
+        webbrowser.open("http://localhost:8000/docs")   # cloud API, opened first so the dashboard tab ends up in front
         dashboard = "http://localhost:3000/d/cloudmarl-main"
         if GRAFANA_DIR.exists():
             print("Starting Grafana ...")
