@@ -14,6 +14,7 @@ environment to change the policy or the load, e.g.  $env:MODE="rr"
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import webbrowser
@@ -94,26 +95,50 @@ providers:
     return prov
 
 
+def kill_orphan_postgres(pgdata):
+    """A killed server can leave backend processes holding its shared memory, and
+    Postgres then refuses to start. If the postmaster is gone, kill what's left."""
+    import psutil
+    try:
+        if psutil.Process(int((pgdata / "postmaster.pid").read_text().split()[0])).name().startswith("postgres"):
+            return   # server still running; pgserver attaches to it
+    except (OSError, ValueError, IndexError, psutil.Error):
+        pass
+    for p in psutil.process_iter(["name", "exe"]):
+        if p.info["name"] == "postgres.exe" and str(LOCAL) in (p.info["exe"] or ""):
+            p.kill()
+
+
 def run():
+    import logging
     import pgserver   # only installed in .local/venv
+    logging.getLogger("pgserver").setLevel(logging.CRITICAL)   # it dumps the whole server log on a timeout
 
     LOGS.mkdir(parents=True, exist_ok=True)
     procs = []
+    stop = threading.Event()   # set when the launcher closes our stdin (its Ctrl+C)
+    threading.Thread(target=lambda: (sys.stdin.read(), stop.set()), daemon=True).start()
 
     def start(name, args, cwd=ROOT, **env):
         log = open(LOGS / f"{name}.log", "w")
-        procs.append(subprocess.Popen(args, cwd=cwd, env={**os.environ, **env},
+        # stdin=DEVNULL: on Windows a child touching our stdin pipe hangs while the stop thread reads it
+        procs.append(subprocess.Popen(args, cwd=cwd, env={**os.environ, **env}, stdin=subprocess.DEVNULL,
                                       stdout=log, stderr=subprocess.STDOUT))
 
     print("Starting PostgreSQL ...")
+    pgdata = LOCAL / "pgdata"
+    kill_orphan_postgres(pgdata)
     # After an unclean shutdown (window closed without Ctrl+C) Postgres runs crash
     # recovery, which on Windows can outlast pgserver's 10 s start timeout. The
     # server keeps starting in the background, so wait and attach to it.
     for _ in range(12):
         try:
-            pg = pgserver.get_server(LOCAL / "pgdata", cleanup_mode="stop")   # stops when we exit
+            # cleanup_mode=None: we stop it ourselves in `finally`. pgserver's own stop is
+            # skipped forever once a crashed run leaves its pid in .handle_pids.json.
+            pg = pgserver.get_server(pgdata, cleanup_mode=None)
             break
-        except (subprocess.TimeoutExpired, AssertionError):
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, AssertionError):
+            pgserver.PostgresServer._instances.clear()   # else get_server returns the failed handle
             print("  PostgreSQL is recovering from an unclean shutdown, waiting ...")
             time.sleep(10)
     else:
@@ -165,8 +190,7 @@ CloudMARL is running.
   Logs        : {LOGS}
 Press Ctrl+C to stop everything.
 """)
-        while True:
-            time.sleep(10)
+        while not stop.wait(10):
             for region in REGIONS:
                 lines = [l for l in (LOGS / f"lb-{region}.log").read_text().splitlines()
                          if l.startswith("[")]
@@ -174,10 +198,19 @@ Press Ctrl+C to stop everything.
                     print(lines[-1])
             print()
     except KeyboardInterrupt:
-        print("Stopping ...")
+        pass
     finally:
-        for p in procs:
+        print("Stopping ...")
+        import psutil
+        for p in procs:   # whole tree: grafana-server.exe starts grafana.exe, which outlives it
+            try:
+                for c in psutil.Process(p.pid).children(recursive=True):
+                    c.terminate()
+            except psutil.Error:
+                pass
             p.terminate()
+        pgserver.pg_ctl(["-w", "-m", "fast", "stop"], pgdata=pgdata)
+        print("Stopped.")
 
 
 if __name__ == "__main__":
@@ -186,9 +219,12 @@ if __name__ == "__main__":
     else:
         LOCAL.mkdir(exist_ok=True)
         setup()
-        child = subprocess.Popen([VENV_PY, __file__, "--run"])
+        # New process group: Ctrl+C in this window must not reach Postgres (it would
+        # crash it). We pass the Ctrl+C on by closing the child's stdin instead.
+        child = subprocess.Popen([VENV_PY, __file__, "--run"], stdin=subprocess.PIPE,
+                                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         while True:
             try:
                 sys.exit(child.wait())
             except KeyboardInterrupt:
-                pass   # the child also gets Ctrl+C and shuts everything down cleanly
+                child.stdin.close()   # the child shuts everything down cleanly
